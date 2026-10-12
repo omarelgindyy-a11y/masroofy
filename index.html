@@ -60,6 +60,9 @@ header.top h1{font-size:20px;margin:0;font-weight:800;display:flex;align-items:c
 h2{font-size:16px;margin:0 0 12px;font-weight:800}
 .cc{padding:10px 0;border-top:1px solid var(--line)}
 .cc:first-of-type{border-top:0;padding-top:0}
+#ccList .cc{cursor:pointer;border-radius:8px}
+#ccList .cc:hover .cc-name{text-decoration:underline}
+.cc-more{color:var(--accent);font-weight:700}
 .cc-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .cc-name{font-weight:700}
 .cc-code{color:var(--muted);font-size:12px;margin-left:6px}
@@ -188,7 +191,7 @@ html,body{height:100%}
   <!-- DASHBOARD -->
   <section class="view on" id="v-dash">
     <div class="card hero">
-      <div class="label">Left to spend this month</div>
+      <div class="label">Left to spend this period</div>
       <div class="big num" id="leftBig"></div>
       <div class="stats">
         <div><small>Income</small><b class="num" id="sSalary"></b></div>
@@ -310,6 +313,8 @@ html,body{height:100%}
         <li>When someone pays back part of it, open the debt, enter the amount under <b>Record payment</b> and tap <b>Add payment</b>.</li>
       </ol>
       <p>A debt moves to Settled when it's fully paid. Overdue debts show in red. Debts don't count as spending.</p>
+      <h3>Pay cycle (salary day)</h3>
+      <p>If your salary arrives on a fixed day, e.g. the 25th, open <b>Budget</b> and set <b>My salary arrives on day</b> to 25. Each period then runs from the 25th to the 24th of the next month, and everything follows it: income, expenses, budgets, reports, the daily limit and closing. Leave it on 1 for normal calendar months.</p>
       <h3>7. Months and monthly close</h3>
       <ul>
         <li>Use ‹ and › at the top to move between months.</li>
@@ -366,6 +371,12 @@ html,body{height:100%}
       </div>
     </div>
     <div class="card">
+      <h2>Pay cycle</h2>
+      <label for="cycleDay">My salary arrives on day</label>
+      <select id="cycleDay"></select>
+      <div class="note" id="cycleTxt"></div>
+    </div>
+    <div class="card">
       <h2>Daily spending limit</h2>
       <div class="seg" style="grid-template-columns:1fr 1fr 1fr" id="dailySeg">
         <button data-m="auto">Auto</button><button data-m="fixed">Fixed</button><button data-m="off">Off</button>
@@ -386,7 +397,7 @@ html,body{height:100%}
         <h2>Salary</h2>
         <label for="salaryIn">Salary for <span id="salMonth"></span></label>
         <input id="salaryIn" type="number" inputmode="decimal" min="0" placeholder="e.g. 20000">
-        <div class="note">Each new month starts with your last salary. Change it here anytime.</div>
+        <div class="note">Each new period starts with your last salary. Change it here anytime.</div>
       </div>
       <div class="card">
         <h2>Other income</h2>
@@ -437,7 +448,7 @@ html,body{height:100%}
         <option value="dark">Dark</option>
       </select>
       <div class="note" id="syncNote">Data saves in this browser on this device.</div>
-      <button class="btn ghost" id="exportCsv">Copy this month's expenses as CSV</button>
+      <button class="btn ghost" id="exportCsv">Copy this period's expenses as CSV</button>
       <button class="btn danger" id="resetAll">Delete all data</button>
     </div>
   </section>
@@ -544,7 +555,7 @@ const clone=o=>JSON.parse(JSON.stringify(o));
 
 function defaults(){
   return {
-    currency:"EGP", theme:"", salaries:{}, closed:{}, debts:[], incomes:[], daily:{mode:"auto",amount:0}, lastPay:"card",
+    currency:"EGP", theme:"", salaries:{}, closed:{}, debts:[], incomes:[], daily:{mode:"auto",amount:0}, lastPay:"card", cycleDay:1,
     centers:[
       {id:uid(),name:"Self care",code:"CC-100",mode:"fixed",value:1000,color:PALETTE[6]},
       {id:uid(),name:"Fuel",code:"CC-200",mode:"fixed",value:2500,color:PALETTE[1]},
@@ -560,14 +571,14 @@ function store(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
 
 function normalize(o){
   const x=Object.assign(defaults(),o||{});
-  if(!x.closed) x.closed={};if(!x.incomes) x.incomes=[];if(!x.debts) x.debts=[];if(!x.salaries) x.salaries={};
+  if(!x.closed) x.closed={};x.cycleDay=Math.min(28,Math.max(1,parseInt(x.cycleDay)||1));if(!x.incomes) x.incomes=[];if(!x.debts) x.debts=[];if(!x.salaries) x.salaries={};
   if(!x.daily) x.daily={mode:"auto",amount:0};if(!x.lastPay) x.lastPay="card";
   return x;
 }
 let S=normalize(load(LS));
 let A=load(LA);
 const now=new Date();
-let cur=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");
+let cur=periodOf(todayStr());
 let editingId=null;
 /* ---------- Supabase ---------- */
 const LC="masroofy-supabase", TABLE="masroofy_data";
@@ -599,16 +610,24 @@ function persist(){
 
 /* ---------- helpers ---------- */
 function fmt(n){const v=Math.round((n||0)*100)/100;return v.toLocaleString(undefined,{maximumFractionDigits:2})+" "+(S.currency||"")}
-function monthLabel(m,short){const [y,mo]=m.split("-").map(Number);return new Date(y,mo-1,1).toLocaleDateString(undefined,short?{month:"short"}:{month:"short",year:"numeric"})}
+function monthLabel(m,short){
+  const [y,mo]=m.split("-").map(Number);
+  if(short||(S.cycleDay||1)===1) return new Date(y,mo-1,1).toLocaleDateString(undefined,short?{month:"short"}:{month:"short",year:"numeric"});
+  const a=new Date(y,mo-1,S.cycleDay),b=new Date(y,mo,S.cycleDay-1);
+  const f=dt=>dt.toLocaleDateString(undefined,{day:"numeric",month:"short"});
+  return f(a)+" – "+f(b)+" "+b.getFullYear();
+}
 function shiftMonth(m,d){let [y,mo]=m.split("-").map(Number);mo+=d;while(mo<1){mo+=12;y--}while(mo>12){mo-=12;y++}return y+"-"+String(mo).padStart(2,"0")}
 const isClosed=m=>!!S.closed[m];
 function salaryFor(m){
   if(S.closed[m]) return S.closed[m].salary;
   if(S.salaries[m]!=null) return Number(S.salaries[m])||0;
   const keys=Object.keys(S.salaries).filter(k=>k<m).sort();
-  return keys.length?Number(S.salaries[keys[keys.length-1]])||0:0;
+  if(keys.length) return Number(S.salaries[keys[keys.length-1]])||0;
+  const later=Object.keys(S.salaries).filter(k=>k>m).sort();
+  return later.length?Number(S.salaries[later[0]])||0:0;
 }
-function incomesIn(m){return S.incomes.filter(e=>(e.date||"").slice(0,7)===m)}
+function incomesIn(m){return S.incomes.filter(e=>periodOf(e.date)===m)}
 function otherIncome(m){return incomesIn(m).reduce((a,e)=>a+(Number(e.amount)||0),0)}
 function incomeFor(m){return salaryFor(m)+otherIncome(m)}
 function budgetOf(c,m){const v=Number(c.value)||0;return c.mode==="percent"?incomeFor(m)*v/100:v}
@@ -623,16 +642,25 @@ function allCats(){
   return [...map.values()];
 }
 function catById(id){return allCats().find(c=>c.id===id)}
-function expensesIn(m){return S.expenses.filter(e=>(e.date||"").slice(0,7)===m)}
+function expensesIn(m){return S.expenses.filter(e=>periodOf(e.date)===m)}
 function spentBy(m){const o={};let t=0;expensesIn(m).forEach(e=>{const a=Number(e.amount)||0;o[e.centerId]=(o[e.centerId]||0)+a;t+=a});o._total=t;return o}
 function todayStr(){const t=new Date();return t.getFullYear()+"-"+String(t.getMonth()+1).padStart(2,"0")+"-"+String(t.getDate()).padStart(2,"0")}
+function ymd(dt){return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0")}
+function periodOf(ds){
+  if(!ds) return "";
+  const cd=S.cycleDay||1,[y,m,d]=ds.split("-").map(Number);
+  if(cd===1||d>=cd) return ds.slice(0,7);
+  return shiftMonth(ds.slice(0,7),-1);
+}
+function periodStart(p){const [y,m]=p.split("-").map(Number);return ymd(new Date(y,m-1,S.cycleDay||1))}
+function periodEnd(p){const [y,m]=p.split("-").map(Number);return ymd(new Date(y,m,(S.cycleDay||1)-1))}
 function dailyInfo(){
-  const td=todayStr(),tm=td.slice(0,7),ex=expensesIn(tm);
+  const td=todayStr(),tm=periodOf(td),ex=expensesIn(tm);
   const spentToday=ex.filter(e=>e.date===td).reduce((a,e)=>a+(Number(e.amount)||0),0);
   let limit=0;
   if(S.daily.mode==="fixed") limit=Number(S.daily.amount)||0;
   else if(S.daily.mode==="auto"){
-    const [y,m,d]=td.split("-").map(Number),dim=new Date(y,m,0).getDate(),daysLeft=dim-d+1;
+    const daysLeft=Math.round((new Date(periodEnd(tm)+"T00:00")-new Date(td+"T00:00"))/86400000)+1;
     const before=ex.filter(e=>e.date<td).reduce((a,e)=>a+(Number(e.amount)||0),0);
     limit=Math.max(0,(incomeFor(tm)-before)/daysLeft);
   }
@@ -691,7 +719,7 @@ async function afterLogin(user){
   sbUser=user;$("aErr").textContent="Loading your data...";
   try{
     const row=await pullCloud();
-    if(row){S=normalize(row.data);store(LS,S);lastSync=row.updated_at;setSync("Signed in as "+user.email)}
+    if(row){S=normalize(row.data);store(LS,S);lastSync=row.updated_at;cur=periodOf(todayStr());setSync("Signed in as "+user.email)}
     else{S=defaults();store(LS,S);await pushNow()}
     $("aErr").textContent="";showApp();
   }catch(e){
@@ -760,7 +788,7 @@ function render(){
   $("monthLbl").textContent=monthLabel(cur);
   $("salMonth").textContent=monthLabel(cur);
   $("closedPill").hidden=!isClosed(cur);
-  fillCenterSelects();renderDash();renderExp();renderDebts();renderReports();renderBudget();renderDaily();renderSettings();
+  renderCycle();fillCenterSelects();renderDash();renderExp();renderDebts();renderReports();renderBudget();renderDaily();renderSettings();
 }
 
 function renderDash(){
@@ -780,10 +808,10 @@ function renderDash(){
   $("legend").innerHTML=leg||`<span style="--c:var(--line)">Add your salary and budgets in the Budget tab</span>`;
   $("ccList").innerHTML=cs.length?cs.map(c=>{
     const s=sp[c.id]||0,b=c.budget,pct=b>0?Math.min(s/b*100,100):(s>0?100:0),over=s>b;
-    return `<div class="cc"><div class="cc-row"><div><span class="cc-name">${esc(c.name)}</span><span class="cc-code">${esc(c.code)}</span></div>
+    return `<div class="cc" data-cc="${esc(c.id)}" role="button" tabindex="0" title="View expenses"><div class="cc-row"><div><span class="cc-name">${esc(c.name)}</span><span class="cc-code">${esc(c.code)}</span></div>
       <div class="cc-amt num ${over?"over":""}">${fmt(s)} / ${fmt(b)}</div></div>
       <div class="bar"><i style="width:${pct}%;background:${over?"var(--warn)":esc(c.color)}"></i></div>
-      <div class="note num" style="margin-top:4px">${over?"Over by "+fmt(s-b):"Left "+fmt(b-s)}</div></div>`}).join("")
+      <div class="cc-row note num" style="margin-top:4px"><span>${over?"Over by "+fmt(s-b):"Left "+fmt(b-s)}</span><span class="cc-more">View expenses ›</span></div></div>`}).join("")
     :`<div class="empty">No cost centers yet. Add them in the Budget tab.</div>`;
   const di=dailyInfo();
   $("todayCard").hidden=S.daily.mode==="off"||cur!==di.tm;
@@ -801,7 +829,7 @@ function renderDash(){
   $("cardAmt").textContent=fmt(card)+(cash+card?" ("+Math.round(card/(cash+card)*100)+"%)":"");
   $("payBar").innerHTML=cash+card?`<i style="width:${cash/(cash+card)*100}%;background:#B7892B" title="Cash"></i><i style="width:${card/(cash+card)*100}%;background:#3B6EA8" title="Card"></i>`:"";
   const rec=sortEx(expensesIn(cur)).slice(0,5);
-  $("recent").innerHTML=rec.length?rec.map(itemHtml).join(""):`<div class="empty">No expenses this month. Tap + to add one.</div>`;
+  $("recent").innerHTML=rec.length?rec.map(itemHtml).join(""):`<div class="empty">No expenses this period. Tap + to add one.</div>`;
 }
 function sortEx(a){return [...a].sort((x,y)=>(y.date||"").localeCompare(x.date||"")||(y.ts||0)-(x.ts||0))}
 function itemHtml(e){
@@ -816,7 +844,7 @@ function renderExp(){
   if(pf) ex=ex.filter(e=>(e.pay==="cash"?"cash":"card")===pf);
   ex=sortEx(ex);const total=ex.reduce((a,e)=>a+(Number(e.amount)||0),0);
   $("expList").innerHTML=ex.length?ex.map(itemHtml).join("")+`<div class="item"><b>Total</b><b class="num">${fmt(total)}</b></div>`
-    :`<div class="empty">No expenses for this month.</div>`;
+    :`<div class="empty">No expenses for this period.</div>`;
 }
 
 /* ---------- reports ---------- */
@@ -934,7 +962,7 @@ $("periodBtn").onclick=async()=>{
     if(!(await checkPw(pw))) return toast("Wrong password");
     delete S.closed[cur];persist();render();toast(monthLabel(cur)+" reopened");
   }else{
-    if(!await ask(`Close ${monthLabel(cur)}? Salary, budgets and expenses for this month will be locked.`)) return;
+    if(!await ask(`Close ${monthLabel(cur)}? Salary, budgets and expenses for this period will be locked.`)) return;
     S.closed[cur]={salary:salaryFor(cur),centers:clone(centersFor(cur)),closedAt:Date.now()};
     S.salaries[cur]=S.closed[cur].salary;
     persist();render();toast(monthLabel(cur)+" closed");
@@ -985,7 +1013,7 @@ function renderIncomes(){
   $("incList").innerHTML=list.length?list.map(i=>`<div class="item" data-inc="${esc(i.id)}" role="button" tabindex="0" style="cursor:pointer">
       <div><div><b>${esc(i.source)}</b></div><div class="meta">${esc(i.date)}${i.note?" · "+esc(i.note):""}</div></div>
       <div class="amt num good">+${fmt(i.amount)}</div></div>`).join("")+`<div class="item"><b>Total</b><b class="num">${fmt(total)}</b></div>`
-    :`<div class="empty">No other income this month.</div>`;
+    :`<div class="empty">No other income this period.</div>`;
 }
 function openInc(id){
   if(isClosed(cur)) return toast(monthLabel(cur)+" is closed");
@@ -994,7 +1022,7 @@ function openInc(id){
   const srcs=[...new Set(S.incomes.map(x=>x.source).filter(Boolean))];
   $("iSrcList").innerHTML=srcs.map(x=>`<option value="${esc(x)}">`).join("");
   $("iSrc").value=i?i.source:"";$("iAmt").value=i?i.amount:"";$("iNote").value=i?(i.note||""):"";
-  const t=todayStr();$("iDate").value=i?i.date:(t.slice(0,7)===cur?t:cur+"-01");
+  const t=todayStr();$("iDate").value=i?i.date:(periodOf(t)===cur?t:periodStart(cur));
   $("delInc").style.display=i?"block":"none";
   $("incBg").classList.add("on");setTimeout(()=>$("iSrc").focus(),50);
 }
@@ -1008,11 +1036,11 @@ $("saveInc").onclick=()=>{
   const source=$("iSrc").value.trim()||"Other income",amt=Number($("iAmt").value),date=$("iDate").value;
   if(!(amt>0))return toast("Enter an amount");
   if(!date)return toast("Pick a date");
-  if(isClosed(date.slice(0,7)))return toast(monthLabel(date.slice(0,7))+" is closed. Pick a date in an open month.");
+  if(isClosed(periodOf(date)))return toast(monthLabel(periodOf(date))+" is closed. Pick a date in an open period.");
   const data={source,amount:amt,date,note:$("iNote").value.trim()};
   if(incId){Object.assign(S.incomes.find(x=>x.id===incId),data);toast("Income updated")}
   else{S.incomes.push(Object.assign({id:uid()},data));toast("Income saved")}
-  cur=date.slice(0,7);persist();closeInc();render();
+  cur=periodOf(date);persist();closeInc();render();
 };
 $("delInc").onclick=async()=>{
   const id=incId;if(!id)return;
@@ -1030,14 +1058,14 @@ function fillCenterSelects(){
 }
 function openSheet(id){
   const e=id?S.expenses.find(x=>x.id===id):null;
-  if(e&&isClosed(e.date.slice(0,7))) return toast(monthLabel(e.date.slice(0,7))+" is closed");
+  if(e&&isClosed(periodOf(e.date))) return toast(monthLabel(periodOf(e.date))+" is closed");
   if(!e&&isClosed(cur)) return toast(monthLabel(cur)+" is closed. Reopen it or pick another month.");
   editingId=id||null;
   $("sheetTitle").textContent=e?"Edit expense":"Add expense";
   $("eAmt").value=e?e.amount:"";fillCenterSelects();
   if(e){if(!S.centers.some(c=>c.id===e.centerId)){const c=catById(e.centerId);$("eCenter").insertAdjacentHTML("beforeend",`<option value="${esc(e.centerId)}">${esc(c?c.name:"No center")}</option>`)}$("eCenter").value=e.centerId}
   const t=new Date(),ts=t.getFullYear()+"-"+String(t.getMonth()+1).padStart(2,"0")+"-"+String(t.getDate()).padStart(2,"0");
-  $("eDate").value=e?e.date:(ts.slice(0,7)===cur?ts:cur+"-01");
+  $("eDate").value=e?e.date:(periodOf(ts)===cur?ts:periodStart(cur));
   $("eRef").value=e?(e.ref||""):"";$("eNote").value=e?(e.note||""):"";
   setSeg("ePay","p",e?(e.pay==="cash"?"cash":"card"):S.lastPay);
   $("delExp").style.display=e?"block":"none";
@@ -1052,8 +1080,8 @@ $("saveExp").onclick=()=>{
   const amt=Number($("eAmt").value);
   if(!(amt>0))return toast("Enter an amount");
   if(!$("eDate").value)return toast("Pick a date");
-  const m=$("eDate").value.slice(0,7);
-  if(isClosed(m))return toast(monthLabel(m)+" is closed. Pick a date in an open month.");
+  const m=periodOf($("eDate").value);
+  if(isClosed(m))return toast(monthLabel(m)+" is closed. Pick a date in an open period.");
   const pay=segVal("ePay","p")||"card";S.lastPay=pay;
   const data={amount:amt,centerId:$("eCenter").value,date:$("eDate").value,ref:$("eRef").value.trim(),note:$("eNote").value.trim(),pay};
   let msg;
@@ -1074,6 +1102,28 @@ function listKey(e){if(e.key==="Enter"){const it=e.target.closest(".item[data-id
 ["recent","expList"].forEach(id=>{$(id).addEventListener("click",listClick);$(id).addEventListener("keydown",listKey)});
 $("expFilter").onchange=renderExp;$("payFilter").onchange=renderExp;
 
+/* ---------- cost center drill-down ---------- */
+function openCenterExpenses(id){
+  go("exp");
+  $("expFilter").value=id;$("payFilter").value="";renderExp();
+}
+$("ccList").addEventListener("click",e=>{const it=e.target.closest("[data-cc]");if(it)openCenterExpenses(it.dataset.cc)});
+$("ccList").addEventListener("keydown",e=>{if(e.key==="Enter"){const it=e.target.closest("[data-cc]");if(it)openCenterExpenses(it.dataset.cc)}});
+
+/* ---------- pay cycle ---------- */
+(function(){let h="";for(let d=1;d<=28;d++)h+=`<option value="${d}">${d}${d===1?" (calendar month)":""}</option>`;$("cycleDay").innerHTML=h})();
+function renderCycle(){
+  $("cycleDay").value=String(S.cycleDay||1);
+  $("cycleTxt").textContent=(S.cycleDay||1)===1?"Periods follow the calendar month (1st to last day).":
+    "Each period runs from day "+S.cycleDay+" to day "+(S.cycleDay-1)+" of the next month. Current period: "+monthLabel(periodOf(todayStr()))+".";
+}
+$("cycleDay").onchange=async e=>{
+  const v=parseInt(e.target.value)||1;
+  if(v===(S.cycleDay||1)) return;
+  if(Object.keys(S.closed).length&&!await ask("You have closed periods. Changing the pay day regroups expenses and income into new periods, so closed totals may no longer match. Continue?")){e.target.value=String(S.cycleDay);return}
+  S.cycleDay=v;cur=periodOf(todayStr());persist();render();toast("Pay cycle starts on day "+v);
+};
+
 /* ---------- daily limit ---------- */
 function renderDaily(){
   setSeg("dailySeg","m",S.daily.mode);
@@ -1081,7 +1131,7 @@ function renderDaily(){
   if(document.activeElement!==$("dailyAmt")) $("dailyAmt").value=S.daily.amount||"";
   const di=dailyInfo();
   $("dailyTxt").textContent=S.daily.mode==="off"?"The Today card is hidden.":
-    S.daily.mode==="auto"?"Today's limit: "+fmt(di.limit)+" (money left this month ÷ days left).":"Today's limit: "+fmt(di.limit)+".";
+    S.daily.mode==="auto"?"Today's limit: "+fmt(di.limit)+" (money left this period ÷ days left until your next salary).":"Today's limit: "+fmt(di.limit)+".";
 }
 document.querySelectorAll("#dailySeg button").forEach(b=>b.onclick=()=>{S.daily.mode=b.dataset.m;persist();renderDaily();renderDash()});
 $("dailyAmt").addEventListener("input",e=>{S.daily.amount=Number(e.target.value)||0;persist();renderDaily();renderDash()});
